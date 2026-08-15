@@ -231,9 +231,17 @@ async def lifespan(app: FastAPI):
     has_qwen = bool(os.environ.get("QWEN_TOKENS") or os.environ.get("QWEN_EMAIL"))
     if has_deepseek or has_qwen:
         try:
-            from danyapi.api.openai import lifespan as dany_lifespan
+            from danyapi.api.openai import lifespan as dany_lifespan, app as dany_app
             dany_ctx = dany_lifespan(app)
             await dany_ctx.__aenter__()
+            # Copy the initialized state from our app to DanyAPI's app
+            # so DanyAPI's handler functions can find the pools
+            if hasattr(app.state, "pool"):
+                dany_app.state.pool = app.state.pool
+            if hasattr(app.state, "qwen_pool"):
+                dany_app.state.qwen_pool = app.state.qwen_pool
+            if hasattr(app.state, "qwen_models"):
+                dany_app.state.qwen_models = app.state.qwen_models
             print("[fountain] DanyAPI initialized (DeepSeek + Qwen)")
         except Exception as exc:
             print(f"[fountain] DanyAPI init failed: {exc}")
@@ -313,11 +321,9 @@ async def chat_completions(request: Request):
 
     if provider in ("deepseek", "qwen"):
         # Route through DanyAPI's handler
-        if not hasattr(app.state, "pool") and not hasattr(app.state, "qwen_pool"):
-            raise HTTPException(status_code=503, detail=f"{provider} provider not configured")
-        # Import and call DanyAPI's chat completion handler
-        from danyapi.api.openai import chat_completions as _dany_chat
-        return await _dany_chat(request)
+        from danyapi.api.openai import chat_completions as _dany_chat, ChatCompletionRequest
+        req = ChatCompletionRequest(**body)
+        return await _dany_chat(req)
 
 
 if __name__ == "__main__":
